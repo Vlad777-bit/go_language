@@ -1,78 +1,104 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"os"
 )
 
-type Transaction struct {
-	ID          int
-	Amount      float64
-	Category    string
-	Description string
-	Date        string
-}
-
-var transactions = make([]Transaction, 0)
-
-func AddTransaction(tx Transaction) error {
-	if tx.Amount == 0 {
-		return errors.New("transaction amount must not be zero")
-	}
-
-	tx.ID = len(transactions) + 1
-	transactions = append(transactions, tx)
-
-	return nil
-}
-
-func ListTransactions() []Transaction {
-	res := make([]Transaction, len(transactions))
-	copy(res, transactions)
-
-	return res
-}
-
 func main() {
-	fmt.Println("Ledger service started")
+	ledger := NewLedger()
 
-	testTransactions := []Transaction{
-		{
-			Amount:      25.50,
-			Category:    "Food",
-			Description: "Lunch",
-			Date:        "2026-09-14",
-		},
-		{
-			Amount:      60,
-			Category:    "Transport",
-			Description: "Train ticket",
-			Date:        "2026-09-14",
-		},
-		{
-			Amount:      120.99,
-			Category:    "Shopping",
-			Description: "Headphones",
-			Date:        "2026-09-14",
-		},
+	// Начальные бюджеты.
+	ledger.SetBudget(Budget{
+		Category: "еда",
+		Limit:    5000,
+		Period:   "month",
+	})
+
+	ledger.SetBudget(Budget{
+		Category: "такси",
+		Limit:    3000,
+		Period:   "month",
+	})
+
+	fmt.Println("Начальные бюджеты:")
+	for category, budget := range ledger.Budgets {
+		fmt.Printf(
+			"%s: %.2f руб.\n",
+			category,
+			budget.Limit,
+		)
 	}
 
-	for _, tx := range testTransactions {
-		if err := AddTransaction(tx); err != nil {
-			fmt.Printf("failed to add transaction: %v\n", err)
+	fmt.Println()
+
+	// Загружаем бюджеты из JSON-файла.
+	file, err := os.Open("budgets.json")
+	if err != nil {
+		fmt.Printf("Не удалось открыть budgets.json: %v\n", err)
+	} else {
+		defer file.Close()
+
+		reader := bufio.NewReader(file)
+
+		if err = ledger.LoadBudgets(reader); err != nil {
+			fmt.Printf("Ошибка загрузки бюджетов: %v\n", err)
+		} else {
+			fmt.Println("Бюджеты из budgets.json успешно загружены.")
 		}
 	}
 
-	fmt.Println("Transactions:")
+	fmt.Println()
 
-	for _, tx := range ListTransactions() {
+	// Транзакция в пределах бюджета.
+	tx1 := Transaction{
+		Category: "еда",
+		Amount:   3000,
+	}
+
+	err = ledger.AddTransaction(tx1)
+	if err != nil {
+		fmt.Printf("Транзакция отклонена: %v\n", err)
+	} else {
 		fmt.Printf(
-			"ID: %d, Amount: %.2f, Category: %s, Description: %s, Date: %s\n",
-			tx.ID,
-			tx.Amount,
+			"Транзакция успешно добавлена: %+v\n",
+			tx1,
+		)
+	}
+
+	// Эта транзакция должна превысить бюджет.
+	tx2 := Transaction{
+		Category: "еда",
+		Amount:   2500,
+	}
+
+	err = ledger.AddTransaction(tx2)
+	if err != nil {
+		if errors.Is(err, ErrBudgetExceeded) {
+			fmt.Printf(
+				"Транзакция отклонена из-за превышения бюджета: %v\n",
+				err,
+			)
+		} else {
+			fmt.Printf("Ошибка добавления транзакции: %v\n", err)
+		}
+	} else {
+		fmt.Printf(
+			"Транзакция успешно добавлена: %+v\n",
+			tx2,
+		)
+	}
+
+	fmt.Println()
+	fmt.Println("Сохранённые транзакции:")
+
+	for _, tx := range ledger.Transactions {
+		fmt.Printf(
+			"Категория: %s, сумма: %.2f руб.\n",
 			tx.Category,
-			tx.Description,
-			tx.Date,
+			tx.Amount,
 		)
 	}
 }

@@ -9,17 +9,49 @@ import (
 
 var ErrBudgetExceeded = errors.New("budget exceeded")
 
+// Validatable задаёт единый контракт валидации данных.
+type Validatable interface {
+	Validate() error
+}
+
 // Transaction описывает финансовую транзакцию.
 type Transaction struct {
 	Category string  `json:"category"`
 	Amount   float64 `json:"amount"`
+	Date     string  `json:"date,omitempty"`
 }
 
-// Budget описывает бюджет для конкретной категории.
+// Validate проверяет корректность транзакции.
+func (t Transaction) Validate() error {
+	if t.Category == "" {
+		return errors.New("transaction category cannot be empty")
+	}
+
+	if t.Amount <= 0 {
+		return errors.New("transaction amount must be greater than zero")
+	}
+
+	return nil
+}
+
+// Budget описывает бюджет для категории.
 type Budget struct {
 	Category string  `json:"category"`
 	Limit    float64 `json:"limit"`
 	Period   string  `json:"period,omitempty"`
+}
+
+// Validate проверяет корректность бюджета.
+func (b Budget) Validate() error {
+	if b.Category == "" {
+		return errors.New("budget category cannot be empty")
+	}
+
+	if b.Limit <= 0 {
+		return errors.New("budget limit must be greater than zero")
+	}
+
+	return nil
 }
 
 // Ledger хранит транзакции и бюджеты.
@@ -36,18 +68,31 @@ func NewLedger() *Ledger {
 	}
 }
 
-// SetBudget добавляет новый бюджет или обновляет существующий.
-func (l *Ledger) SetBudget(b Budget) {
-	l.Budgets[b.Category] = b
+// CheckValid демонстрирует полиморфизм через интерфейс Validatable.
+func CheckValid(v Validatable) error {
+	return v.Validate()
 }
 
-// AddTransaction добавляет транзакцию,
-// если после её добавления не будет превышен бюджет категории.
+// SetBudget добавляет новый бюджет или обновляет существующий.
+func (l *Ledger) SetBudget(b Budget) error {
+	if err := b.Validate(); err != nil {
+		return fmt.Errorf("invalid budget: %w", err)
+	}
+
+	l.Budgets[b.Category] = b
+
+	return nil
+}
+
+// AddTransaction добавляет транзакцию после валидации
+// и проверки бюджета.
 func (l *Ledger) AddTransaction(tx Transaction) error {
+	if err := tx.Validate(); err != nil {
+		return fmt.Errorf("invalid transaction: %w", err)
+	}
+
 	budget, exists := l.Budgets[tx.Category]
 
-	// Если бюджет для категории установлен,
-	// считаем уже потраченную сумму.
 	if exists {
 		var currentAmount float64
 
@@ -57,7 +102,6 @@ func (l *Ledger) AddTransaction(tx Transaction) error {
 			}
 		}
 
-		// Проверяем, не будет ли превышен лимит.
 		if currentAmount+tx.Amount > budget.Limit {
 			return fmt.Errorf(
 				"%w: category=%s, limit=%.2f, current=%.2f, transaction=%.2f",
@@ -70,7 +114,6 @@ func (l *Ledger) AddTransaction(tx Transaction) error {
 		}
 	}
 
-	// Транзакция сохраняется только после успешной проверки.
 	l.Transactions = append(l.Transactions, tx)
 
 	return nil
@@ -87,18 +130,13 @@ func (l *Ledger) LoadBudgets(r io.Reader) error {
 	}
 
 	for _, budget := range budgets {
-		if budget.Category == "" {
-			return errors.New("budget category cannot be empty")
-		}
-
-		if budget.Limit < 0 {
+		if err := l.SetBudget(budget); err != nil {
 			return fmt.Errorf(
-				"budget limit cannot be negative for category %q",
+				"failed to add budget for category %q: %w",
 				budget.Category,
+				err,
 			)
 		}
-
-		l.SetBudget(budget)
 	}
 
 	return nil

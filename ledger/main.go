@@ -10,31 +10,71 @@ import (
 func main() {
 	ledger := NewLedger()
 
-	// Начальные бюджеты.
-	ledger.SetBudget(Budget{
+	// Проверяем работу интерфейса Validatable.
+	validTransaction := Transaction{
+		Category: "еда",
+		Amount:   1000,
+		Date:     "2026-09-29",
+	}
+
+	invalidTransaction := Transaction{
+		Category: "",
+		Amount:   -500,
+	}
+
+	validBudget := Budget{
 		Category: "еда",
 		Limit:    5000,
 		Period:   "month",
-	})
+	}
 
-	ledger.SetBudget(Budget{
-		Category: "такси",
-		Limit:    3000,
-		Period:   "month",
-	})
+	invalidBudget := Budget{
+		Category: "",
+		Limit:    0,
+	}
 
-	fmt.Println("Начальные бюджеты:")
-	for category, budget := range ledger.Budgets {
-		fmt.Printf(
-			"%s: %.2f руб.\n",
-			category,
-			budget.Limit,
-		)
+	fmt.Println("Проверка через интерфейс Validatable:")
+
+	if err := CheckValid(validTransaction); err != nil {
+		fmt.Printf("Ошибка Transaction: %v\n", err)
+	} else {
+		fmt.Println("Transaction корректна")
+	}
+
+	if err := CheckValid(invalidTransaction); err != nil {
+		fmt.Printf("Некорректная Transaction: %v\n", err)
+	}
+
+	if err := CheckValid(validBudget); err != nil {
+		fmt.Printf("Ошибка Budget: %v\n", err)
+	} else {
+		fmt.Println("Budget корректен")
+	}
+
+	if err := CheckValid(invalidBudget); err != nil {
+		fmt.Printf("Некорректный Budget: %v\n", err)
 	}
 
 	fmt.Println()
 
-	// Загружаем бюджеты из JSON-файла.
+	// Устанавливаем начальные бюджеты.
+	if err := ledger.SetBudget(Budget{
+		Category: "еда",
+		Limit:    5000,
+		Period:   "month",
+	}); err != nil {
+		fmt.Printf("Ошибка установки бюджета: %v\n", err)
+	}
+
+	if err := ledger.SetBudget(Budget{
+		Category: "такси",
+		Limit:    3000,
+		Period:   "month",
+	}); err != nil {
+		fmt.Printf("Ошибка установки бюджета: %v\n", err)
+	}
+
+	// Загружаем бюджеты из JSON.
 	file, err := os.Open("budgets.json")
 	if err != nil {
 		fmt.Printf("Не удалось открыть budgets.json: %v\n", err)
@@ -43,52 +83,54 @@ func main() {
 
 		reader := bufio.NewReader(file)
 
-		if err = ledger.LoadBudgets(reader); err != nil {
+		if err := ledger.LoadBudgets(reader); err != nil {
 			fmt.Printf("Ошибка загрузки бюджетов: %v\n", err)
 		} else {
-			fmt.Println("Бюджеты из budgets.json успешно загружены.")
+			fmt.Println("Бюджеты из budgets.json успешно загружены")
 		}
 	}
 
 	fmt.Println()
 
-	// Транзакция в пределах бюджета.
+	// Валидная транзакция в пределах бюджета.
 	tx1 := Transaction{
 		Category: "еда",
 		Amount:   3000,
+		Date:     "2026-09-29",
 	}
 
-	err = ledger.AddTransaction(tx1)
-	if err != nil {
+	if err := ledger.AddTransaction(tx1); err != nil {
 		fmt.Printf("Транзакция отклонена: %v\n", err)
 	} else {
-		fmt.Printf(
-			"Транзакция успешно добавлена: %+v\n",
-			tx1,
-		)
+		fmt.Printf("Транзакция успешно добавлена: %+v\n", tx1)
 	}
 
-	// Эта транзакция должна превысить бюджет.
+	// Валидная транзакция, но превышает бюджет.
 	tx2 := Transaction{
 		Category: "еда",
 		Amount:   2500,
+		Date:     "2026-09-29",
 	}
 
-	err = ledger.AddTransaction(tx2)
-	if err != nil {
+	if err := ledger.AddTransaction(tx2); err != nil {
 		if errors.Is(err, ErrBudgetExceeded) {
 			fmt.Printf(
 				"Транзакция отклонена из-за превышения бюджета: %v\n",
 				err,
 			)
 		} else {
-			fmt.Printf("Ошибка добавления транзакции: %v\n", err)
+			fmt.Printf("Ошибка транзакции: %v\n", err)
 		}
-	} else {
-		fmt.Printf(
-			"Транзакция успешно добавлена: %+v\n",
-			tx2,
-		)
+	}
+
+	// Невалидная транзакция.
+	tx3 := Transaction{
+		Category: "",
+		Amount:   -100,
+	}
+
+	if err := ledger.AddTransaction(tx3); err != nil {
+		fmt.Printf("Невалидная транзакция отклонена: %v\n", err)
 	}
 
 	fmt.Println()
@@ -96,9 +138,10 @@ func main() {
 
 	for _, tx := range ledger.Transactions {
 		fmt.Printf(
-			"Категория: %s, сумма: %.2f руб.\n",
+			"Категория: %s, сумма: %.2f руб., дата: %s\n",
 			tx.Category,
 			tx.Amount,
+			tx.Date,
 		)
 	}
 }

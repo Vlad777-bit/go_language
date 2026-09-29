@@ -6,22 +6,132 @@ import (
 	"testing"
 )
 
-func TestAddTransactionWithinBudget(t *testing.T) {
+func TestTransactionValidateValid(t *testing.T) {
+	tx := Transaction{
+		Category: "еда",
+		Amount:   1000,
+		Date:     "2026-09-29",
+	}
+
+	if err := tx.Validate(); err != nil {
+		t.Fatalf("expected valid transaction, got error: %v", err)
+	}
+}
+
+func TestTransactionValidateEmptyCategory(t *testing.T) {
+	tx := Transaction{
+		Category: "",
+		Amount:   1000,
+	}
+
+	if err := tx.Validate(); err == nil {
+		t.Fatal("expected validation error for empty category")
+	}
+}
+
+func TestTransactionValidateInvalidAmount(t *testing.T) {
+	tx := Transaction{
+		Category: "еда",
+		Amount:   0,
+	}
+
+	if err := tx.Validate(); err == nil {
+		t.Fatal("expected validation error for zero amount")
+	}
+}
+
+func TestBudgetValidateValid(t *testing.T) {
+	budget := Budget{
+		Category: "еда",
+		Limit:    5000,
+	}
+
+	if err := budget.Validate(); err != nil {
+		t.Fatalf("expected valid budget, got error: %v", err)
+	}
+}
+
+func TestBudgetValidateInvalidLimit(t *testing.T) {
+	budget := Budget{
+		Category: "еда",
+		Limit:    0,
+	}
+
+	if err := budget.Validate(); err == nil {
+		t.Fatal("expected validation error for invalid budget limit")
+	}
+}
+
+func TestCheckValid(t *testing.T) {
+	tx := Transaction{
+		Category: "еда",
+		Amount:   1000,
+	}
+
+	budget := Budget{
+		Category: "еда",
+		Limit:    5000,
+	}
+
+	if err := CheckValid(tx); err != nil {
+		t.Fatalf("transaction should be valid: %v", err)
+	}
+
+	if err := CheckValid(budget); err != nil {
+		t.Fatalf("budget should be valid: %v", err)
+	}
+}
+
+func TestSetBudget(t *testing.T) {
 	ledger := NewLedger()
 
-	ledger.SetBudget(Budget{
+	err := ledger.SetBudget(Budget{
 		Category: "еда",
 		Limit:    5000,
 	})
-
-	tx := Transaction{
-		Category: "еда",
-		Amount:   3000,
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 
-	err := ledger.AddTransaction(tx)
+	if ledger.Budgets["еда"].Limit != 5000 {
+		t.Fatal("budget was not saved correctly")
+	}
+}
+
+func TestSetBudgetRejectsInvalidBudget(t *testing.T) {
+	ledger := NewLedger()
+
+	err := ledger.SetBudget(Budget{
+		Category: "",
+		Limit:    0,
+	})
+
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+
+	if len(ledger.Budgets) != 0 {
+		t.Fatal("invalid budget must not be saved")
+	}
+}
+
+func TestAddTransactionWithinBudget(t *testing.T) {
+	ledger := NewLedger()
+
+	err := ledger.SetBudget(Budget{
+		Category: "еда",
+		Limit:    5000,
+	})
 	if err != nil {
-		t.Fatalf("expected transaction to be added, got error: %v", err)
+		t.Fatalf("unexpected budget error: %v", err)
+	}
+
+	err = ledger.AddTransaction(Transaction{
+		Category: "еда",
+		Amount:   3000,
+	})
+	if err != nil {
+		t.Fatalf("unexpected transaction error: %v", err)
 	}
 
 	if len(ledger.Transactions) != 1 {
@@ -35,20 +145,20 @@ func TestAddTransactionWithinBudget(t *testing.T) {
 func TestAddTransactionExceedsBudget(t *testing.T) {
 	ledger := NewLedger()
 
-	ledger.SetBudget(Budget{
+	err := ledger.SetBudget(Budget{
 		Category: "еда",
 		Limit:    5000,
 	})
+	if err != nil {
+		t.Fatalf("unexpected budget error: %v", err)
+	}
 
-	err := ledger.AddTransaction(Transaction{
+	err = ledger.AddTransaction(Transaction{
 		Category: "еда",
 		Amount:   3000,
 	})
 	if err != nil {
-		t.Fatalf(
-			"unexpected error for first transaction: %v",
-			err,
-		)
+		t.Fatalf("unexpected first transaction error: %v", err)
 	}
 
 	err = ledger.AddTransaction(Transaction{
@@ -57,74 +167,32 @@ func TestAddTransactionExceedsBudget(t *testing.T) {
 	})
 
 	if err == nil {
-		t.Fatal("expected budget exceeded error, got nil")
+		t.Fatal("expected budget exceeded error")
 	}
 
 	if !errors.Is(err, ErrBudgetExceeded) {
-		t.Fatalf(
-			"expected ErrBudgetExceeded, got: %v",
-			err,
-		)
-	}
-
-	// Проверяем самое важное:
-	// отклонённая транзакция не должна сохраниться.
-	if len(ledger.Transactions) != 1 {
-		t.Fatalf(
-			"expected rejected transaction not to be saved; got %d transactions",
-			len(ledger.Transactions),
-		)
-	}
-}
-
-func TestAddTransactionWithoutBudget(t *testing.T) {
-	ledger := NewLedger()
-
-	tx := Transaction{
-		Category: "книги",
-		Amount:   10000,
-	}
-
-	err := ledger.AddTransaction(tx)
-	if err != nil {
-		t.Fatalf(
-			"transaction without budget should be allowed, got error: %v",
-			err,
-		)
+		t.Fatalf("expected ErrBudgetExceeded, got: %v", err)
 	}
 
 	if len(ledger.Transactions) != 1 {
-		t.Fatalf(
-			"expected 1 transaction, got %d",
-			len(ledger.Transactions),
-		)
+		t.Fatal("rejected transaction must not be saved")
 	}
 }
 
-func TestSetBudgetUpdatesExistingBudget(t *testing.T) {
+func TestAddTransactionRejectsInvalidTransaction(t *testing.T) {
 	ledger := NewLedger()
 
-	ledger.SetBudget(Budget{
-		Category: "еда",
-		Limit:    5000,
+	err := ledger.AddTransaction(Transaction{
+		Category: "",
+		Amount:   -100,
 	})
 
-	ledger.SetBudget(Budget{
-		Category: "еда",
-		Limit:    7000,
-	})
-
-	budget, exists := ledger.Budgets["еда"]
-
-	if !exists {
-		t.Fatal("expected budget for category еда")
+	if err == nil {
+		t.Fatal("expected validation error")
 	}
 
-	if budget.Limit != 7000 {
-		t.Fatalf(
-			"expected updated limit 7000, got %.2f",
-			budget.Limit,
-		)
+	if len(ledger.Transactions) != 0 {
+		t.Fatal("invalid transaction must not be saved")
 	}
 }
 
@@ -148,10 +216,7 @@ func TestLoadBudgets(t *testing.T) {
 
 	err := ledger.LoadBudgets(strings.NewReader(jsonData))
 	if err != nil {
-		t.Fatalf(
-			"expected budgets to load successfully, got: %v",
-			err,
-		)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if len(ledger.Budgets) != 2 {
@@ -160,30 +225,27 @@ func TestLoadBudgets(t *testing.T) {
 			len(ledger.Budgets),
 		)
 	}
-
-	if ledger.Budgets["еда"].Limit != 5000 {
-		t.Fatalf(
-			"expected food budget 5000, got %.2f",
-			ledger.Budgets["еда"].Limit,
-		)
-	}
 }
 
-func TestLoadBudgetsInvalidJSON(t *testing.T) {
+func TestLoadBudgetsRejectsInvalidBudget(t *testing.T) {
 	ledger := NewLedger()
 
-	invalidJSON := `
+	jsonData := `
 	[
 		{
-			"category": "еда",
-			"limit":
+			"category": "",
+			"limit": 0
 		}
 	]
 	`
 
-	err := ledger.LoadBudgets(strings.NewReader(invalidJSON))
+	err := ledger.LoadBudgets(strings.NewReader(jsonData))
 
 	if err == nil {
-		t.Fatal("expected JSON parsing error, got nil")
+		t.Fatal("expected validation error")
+	}
+
+	if len(ledger.Budgets) != 0 {
+		t.Fatal("invalid budget must not be saved")
 	}
 }

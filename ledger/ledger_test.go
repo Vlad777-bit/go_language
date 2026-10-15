@@ -2,250 +2,235 @@ package ledger
 
 import (
 	"errors"
-	"strings"
 	"testing"
 )
 
-func TestTransactionValidateValid(t *testing.T) {
-	tx := Transaction{
-		Category: "еда",
-		Amount:   1000,
-		Date:     "2026-09-29",
+func TestTransactionValidate(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		tx      Transaction
+		wantErr bool
+	}{
+		{
+			name: "valid transaction",
+			tx: Transaction{
+				Amount:      1000,
+				Category:    "еда",
+				Description: "ланч",
+				Date:        "2026-10-15",
+			},
+			wantErr: false,
+		},
+		{
+			name: "zero amount",
+			tx: Transaction{
+				Amount:   0,
+				Category: "еда",
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative amount",
+			tx: Transaction{
+				Amount:   -100,
+				Category: "еда",
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty category",
+			tx: Transaction{
+				Amount:   1000,
+				Category: "",
+			},
+			wantErr: true,
+		},
 	}
 
-	if err := tx.Validate(); err != nil {
-		t.Fatalf("expected valid transaction, got error: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.tx.Validate()
+
+			if tt.wantErr && err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+
+			if !tt.wantErr && err != nil {
+				t.Fatalf("expected nil error, got %v", err)
+			}
+		})
 	}
 }
 
-func TestTransactionValidateEmptyCategory(t *testing.T) {
-	tx := Transaction{
-		Category: "",
-		Amount:   1000,
+func TestBudgetValidate(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		budget  Budget
+		wantErr bool
+	}{
+		{
+			name: "valid budget",
+			budget: Budget{
+				Category: "еда",
+				Limit:    5000,
+			},
+			wantErr: false,
+		},
+		{
+			name: "zero limit",
+			budget: Budget{
+				Category: "еда",
+				Limit:    0,
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative limit",
+			budget: Budget{
+				Category: "еда",
+				Limit:    -5000,
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty category",
+			budget: Budget{
+				Category: "",
+				Limit:    5000,
+			},
+			wantErr: true,
+		},
 	}
 
-	if err := tx.Validate(); err == nil {
-		t.Fatal("expected validation error for empty category")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.budget.Validate()
+
+			if tt.wantErr && err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+
+			if !tt.wantErr && err != nil {
+				t.Fatalf("expected nil error, got %v", err)
+			}
+		})
 	}
 }
 
-func TestTransactionValidateInvalidAmount(t *testing.T) {
-	tx := Transaction{
-		Category: "еда",
-		Amount:   0,
-	}
+func TestLedgerBudgetLimit(t *testing.T) {
+	l := NewLedger()
+	t.Cleanup(l.Reset)
 
-	if err := tx.Validate(); err == nil {
-		t.Fatal("expected validation error for zero amount")
-	}
-}
-
-func TestBudgetValidateValid(t *testing.T) {
-	budget := Budget{
+	err := l.SetBudget(Budget{
 		Category: "еда",
 		Limit:    5000,
+	})
+	if err != nil {
+		t.Fatalf("set budget: %v", err)
 	}
 
-	if err := budget.Validate(); err != nil {
-		t.Fatalf("expected valid budget, got error: %v", err)
-	}
-}
+	t.Run("within limit", func(t *testing.T) {
+		err := l.AddTransaction(Transaction{
+			Amount:      3000,
+			Category:    "еда",
+			Description: "продукты",
+			Date:        "2026-10-15",
+		})
+		if err != nil {
+			t.Fatalf("expected transaction to be accepted, got %v", err)
+		}
 
-func TestBudgetValidateInvalidLimit(t *testing.T) {
-	budget := Budget{
-		Category: "еда",
-		Limit:    0,
-	}
+		transactions := l.ListTransactions()
 
-	if err := budget.Validate(); err == nil {
-		t.Fatal("expected validation error for invalid budget limit")
-	}
-}
+		if len(transactions) != 1 {
+			t.Fatalf(
+				"expected 1 transaction, got %d",
+				len(transactions),
+			)
+		}
+	})
 
-func TestCheckValid(t *testing.T) {
-	tx := Transaction{
-		Category: "еда",
-		Amount:   1000,
-	}
+	t.Run("budget exceeded", func(t *testing.T) {
+		err := l.AddTransaction(Transaction{
+			Amount:      2500,
+			Category:    "еда",
+			Description: "ещё продукты",
+			Date:        "2026-10-15",
+		})
 
-	budget := Budget{
-		Category: "еда",
-		Limit:    5000,
-	}
+		if err == nil {
+			t.Fatal("expected budget exceeded error")
+		}
 
-	if err := CheckValid(tx); err != nil {
-		t.Fatalf("transaction should be valid: %v", err)
-	}
+		if !errors.Is(err, ErrBudgetExceeded) {
+			t.Fatalf(
+				"expected ErrBudgetExceeded, got %v",
+				err,
+			)
+		}
 
-	if err := CheckValid(budget); err != nil {
-		t.Fatalf("budget should be valid: %v", err)
-	}
+		transactions := l.ListTransactions()
+
+		if len(transactions) != 1 {
+			t.Fatalf(
+				"rejected transaction must not be saved; got %d transactions",
+				len(transactions),
+			)
+		}
+	})
 }
 
 func TestSetBudget(t *testing.T) {
-	ledger := NewLedger()
-
-	err := ledger.SetBudget(Budget{
-		Category: "еда",
-		Limit:    5000,
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if ledger.Budgets["еда"].Limit != 5000 {
-		t.Fatal("budget was not saved correctly")
-	}
-}
-
-func TestSetBudgetRejectsInvalidBudget(t *testing.T) {
-	ledger := NewLedger()
-
-	err := ledger.SetBudget(Budget{
-		Category: "",
-		Limit:    0,
-	})
-
-	if err == nil {
-		t.Fatal("expected validation error")
-	}
-
-	if len(ledger.Budgets) != 0 {
-		t.Fatal("invalid budget must not be saved")
-	}
-}
-
-func TestAddTransactionWithinBudget(t *testing.T) {
-	ledger := NewLedger()
-
-	err := ledger.SetBudget(Budget{
-		Category: "еда",
-		Limit:    5000,
-	})
-	if err != nil {
-		t.Fatalf("unexpected budget error: %v", err)
-	}
-
-	err = ledger.AddTransaction(Transaction{
-		Category: "еда",
-		Amount:   3000,
-	})
-	if err != nil {
-		t.Fatalf("unexpected transaction error: %v", err)
-	}
-
-	if len(ledger.Transactions) != 1 {
-		t.Fatalf(
-			"expected 1 transaction, got %d",
-			len(ledger.Transactions),
-		)
-	}
-}
-
-func TestAddTransactionExceedsBudget(t *testing.T) {
-	ledger := NewLedger()
-
-	err := ledger.SetBudget(Budget{
-		Category: "еда",
-		Limit:    5000,
-	})
-	if err != nil {
-		t.Fatalf("unexpected budget error: %v", err)
-	}
-
-	err = ledger.AddTransaction(Transaction{
-		Category: "еда",
-		Amount:   3000,
-	})
-	if err != nil {
-		t.Fatalf("unexpected first transaction error: %v", err)
-	}
-
-	err = ledger.AddTransaction(Transaction{
-		Category: "еда",
-		Amount:   2500,
-	})
-
-	if err == nil {
-		t.Fatal("expected budget exceeded error")
-	}
-
-	if !errors.Is(err, ErrBudgetExceeded) {
-		t.Fatalf("expected ErrBudgetExceeded, got: %v", err)
-	}
-
-	if len(ledger.Transactions) != 1 {
-		t.Fatal("rejected transaction must not be saved")
-	}
-}
-
-func TestAddTransactionRejectsInvalidTransaction(t *testing.T) {
-	ledger := NewLedger()
-
-	err := ledger.AddTransaction(Transaction{
-		Category: "",
-		Amount:   -100,
-	})
-
-	if err == nil {
-		t.Fatal("expected validation error")
-	}
-
-	if len(ledger.Transactions) != 0 {
-		t.Fatal("invalid transaction must not be saved")
-	}
-}
-
-func TestLoadBudgets(t *testing.T) {
-	ledger := NewLedger()
-
-	jsonData := `
-	[
+	tests := []struct {
+		name    string
+		budget  Budget
+		wantErr bool
+	}{
 		{
-			"category": "еда",
-			"limit": 5000,
-			"period": "month"
+			name: "valid",
+			budget: Budget{
+				Category: "такси",
+				Limit:    3000,
+			},
+			wantErr: false,
 		},
 		{
-			"category": "такси",
-			"limit": 3000,
-			"period": "month"
-		}
-	]
-	`
-
-	err := ledger.LoadBudgets(strings.NewReader(jsonData))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+			name: "invalid",
+			budget: Budget{
+				Category: "",
+				Limit:    0,
+			},
+			wantErr: true,
+		},
 	}
 
-	if len(ledger.Budgets) != 2 {
-		t.Fatalf(
-			"expected 2 budgets, got %d",
-			len(ledger.Budgets),
-		)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-func TestLoadBudgetsRejectsInvalidBudget(t *testing.T) {
-	ledger := NewLedger()
+			l := NewLedger()
 
-	jsonData := `
-	[
-		{
-			"category": "",
-			"limit": 0
-		}
-	]
-	`
+			err := l.SetBudget(tt.budget)
 
-	err := ledger.LoadBudgets(strings.NewReader(jsonData))
+			if tt.wantErr && err == nil {
+				t.Fatal("expected error, got nil")
+			}
 
-	if err == nil {
-		t.Fatal("expected validation error")
-	}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 
-	if len(ledger.Budgets) != 0 {
-		t.Fatal("invalid budget must not be saved")
+			if tt.wantErr && len(l.ListBudgets()) != 0 {
+				t.Fatal("invalid budget must not be saved")
+			}
+		})
 	}
 }

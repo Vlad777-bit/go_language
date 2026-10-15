@@ -1,4 +1,4 @@
-package main
+package ledger
 
 import (
 	"encoding/json"
@@ -16,9 +16,10 @@ type Validatable interface {
 
 // Transaction описывает финансовую транзакцию.
 type Transaction struct {
-	Category string  `json:"category"`
-	Amount   float64 `json:"amount"`
-	Date     string  `json:"date,omitempty"`
+	Amount      float64 `json:"amount"`
+	Category    string  `json:"category"`
+	Description string  `json:"description"`
+	Date        string  `json:"date"`
 }
 
 // Validate проверяет корректность транзакции.
@@ -140,4 +141,21 @@ func (l *Ledger) LoadBudgets(r io.Reader) error {
 	}
 
 	return nil
+}
+
+func (l *Ledger) ListTransactions() []Transaction {
+	result := make([]Transaction, len(l.Transactions))
+	copy(result, l.Transactions)
+
+	return result
+}
+
+func (l *Ledger) ListBudgets() []Budget {
+	result := make([]Budget, 0, len(l.Budgets))
+
+	for _, budget := range l.Budgets {
+		result = append(result, budget)
+	}
+
+	return result
 }

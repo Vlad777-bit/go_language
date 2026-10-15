@@ -1,0 +1,17 @@
+[
+  {
+    "category": "еда",
+    "limit": 5000,
+    "period": "month"
+  },
+  {
+    "category": "такси",
+    "limit": 3000,
+    "period": "month"
+  },
+  {
+    "category": "развлечения",
+    "limit": 4000,
+    "period": "month"
+  }
+]
